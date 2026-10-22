@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/png" href="/Tab_Logo.png" />
+    <link rel="apple-touch-icon" href="/Tab_Logo.png" />
+    <title>Personal Vault</title>
+    <meta name="description" content="Your premium private digital vault — secure content library for links, videos, notes, and files." />
+    <meta name="theme-color" content="#0a0a0a" />
+    <meta property="og:title" content="Personal Vault" />
+    <meta property="og:description" content="Premium private digital vault — secure content library" />
+    <meta property="og:type" content="website" />
+    <style>
+      html, body { margin: 0; padding: 0; width: 100%; height: 100%; }
+      html.dark, html.dark body { background-color: #0a0a0a; color: #ffffff; }
+      html.light, html.light body { background-color: #f8f8f8; color: #0a0a0a; }
+      #root { min-height: 100vh; }
+    </style>
+    <script>
+      (function() {
+        const stored = localStorage.getItem('pv-theme');
+        const system = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+        const theme = stored === 'system' ? system : (stored || 'dark');
+        document.documentElement.classList.remove('light', 'dark');
+        document.documentElement.classList.add(theme);
+        document.documentElement.setAttribute('data-theme', theme);
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
