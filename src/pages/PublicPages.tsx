@@ -37,7 +37,11 @@ export function HomePage() {
   useEffect(()=>{ if(!isConfigured){setLoading(false);return;} loadItems().then(setItems).catch(()=>setItems([])).finally(()=>setLoading(false)); },[]);
   const filtered=useMemo(()=>items.filter(i=>(filter==='all'||i.type===filter)&&(!q||`${i.title} ${i.description||''} ${(i.tags||[]).join(' ')}`.toLowerCase().includes(q.toLowerCase()))),[items,filter,q]);
   return <PublicLayout><div className="max-w-7xl mx-auto px-4 py-10">
-    <div className="text-center max-w-3xl mx-auto mb-10"><img src="/Logo.png" alt="Personal Vault" className="w-20 h-20 object-contain mx-auto mb-5"/><h1 className="text-4xl md:text-5xl font-bold text-primary">Personal Vault</h1><p className="text-secondary mt-3">A secure, curated space for links, videos, notes and files.</p></div>
+    <div className="text-center max-w-3xl mx-auto mb-10"><img
+  src={`${import.meta.env.BASE_URL}Logo.png`}
+  alt="Personal Vault"
+  className="w-20 h-20 object-contain mx-auto mb-5"
+/><h1 className="text-4xl md:text-5xl font-bold text-primary">Personal Vault</h1><p className="text-secondary mt-3">A secure, curated space for links, videos, notes and files.</p></div>
     <div className="max-w-xl mx-auto mb-6"><input className="input-field" placeholder="Search public content..." value={q} onChange={e=>setQ(e.target.value)}/></div>
     <div className="flex gap-2 overflow-x-auto pb-2 mb-7">{(['all','link','video','note','file'] as const).map(f=><button key={f} onClick={()=>setFilter(f)} className={`px-4 py-2 rounded-xl text-sm ${filter===f?'bg-accent/10 text-accent':'glass text-secondary'}`}>{f==='all'?'All':titles[f] }</button>)}</div>
     {loading?<div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">{[1,2,3].map(i=><SkeletonCard key={i}/>)}</div>:<Grid items={filtered}/>}</div></PublicLayout>;

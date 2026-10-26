@@ -39,7 +39,7 @@ function AuthShell({
       <div className="w-full max-w-md">
         <div className="text-center mb-6">
           <img
-            src="/Logo.png"
+            src={`${import.meta.env.BASE_URL}Logo.png`}
             alt="Personal Vault"
             className="w-16 h-16 object-contain mx-auto mb-3"
           />
@@ -386,7 +386,7 @@ export function AccountPage() {
         <GlassCard className="p-6 space-y-5">
           <div className="flex items-center gap-4">
             <img
-              src="/Logo.png"
+              src={`${import.meta.env.BASE_URL}Logo.png`}
               alt="Personal Vault"
               className="w-14 h-14 object-contain"
             />
