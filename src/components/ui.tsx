@@ -195,9 +195,16 @@ export function LoadingScreen() {
     <div className="fixed inset-0 flex items-center justify-center bg-surface z-50">
       <div className="flex flex-col items-center gap-4">
         <div className="w-12 h-12 rounded-xl bg-accent/10 flex items-center justify-center animate-pulse-glow">
-          <img src="/Logo.png" alt="Personal Vault" className="w-7 h-7 object-contain" />
+          <img
+            src={`${import.meta.env.BASE_URL}Logo.png`}
+            alt="Personal Vault"
+            className="w-7 h-7 object-contain"
+          />
         </div>
-        <p className="text-sm text-secondary">Loading Personal Vault...</p>
+
+        <p className="text-sm text-secondary">
+          Loading Personal Vault...
+        </p>
       </div>
     </div>
   );

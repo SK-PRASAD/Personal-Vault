@@ -42,6 +42,10 @@ interface AuthContextType extends AuthState {
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
+/* -------------------------------------------------------
+   LOAD MEMBER PROFILE
+------------------------------------------------------- */
+
 async function loadProfile(
   userId: string,
   email = ""
@@ -52,35 +56,63 @@ async function loadProfile(
     .eq("user_id", userId)
     .maybeSingle();
 
-  if (error || !data) {
+  if (error) {
+    console.error("Profile load failed:", error);
     return null;
   }
 
-  const { data: permissions } = await supabase
-    .from("item_permissions")
-    .select("item_id")
-    .eq("user_id", userId);
+  if (!data) {
+    return null;
+  }
+
+  const { data: permissions, error: permissionsError } =
+    await supabase
+      .from("item_permissions")
+      .select("item_id")
+      .eq("user_id", userId);
+
+  if (permissionsError) {
+    console.error(
+      "Permission load failed:",
+      permissionsError
+    );
+  }
 
   return {
     id: userId,
     email,
     name: data.display_name || "",
     status: data.status as MemberStatus,
-    permissions: permissions?.length ? ["view"] : ["view"],
+    permissions: permissions?.length
+      ? ["view"]
+      : ["view"],
     created_at: data.created_at,
     updated_at: data.updated_at,
   };
 }
 
+/* -------------------------------------------------------
+   CHECK ADMIN
+------------------------------------------------------- */
+
 async function isAdmin(userId: string): Promise<boolean> {
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from("admin_users")
     .select("user_id")
     .eq("user_id", userId)
     .maybeSingle();
 
+  if (error) {
+    console.error("Admin check failed:", error);
+    return false;
+  }
+
   return Boolean(data);
 }
+
+/* -------------------------------------------------------
+   AUTH PROVIDER
+------------------------------------------------------- */
 
 export function AuthProvider({
   children,
@@ -94,19 +126,33 @@ export function AuthProvider({
     loading: true,
   });
 
+  /* -----------------------------------------------------
+     REFRESH SESSION
+  ----------------------------------------------------- */
+
   const refreshSession = useCallback(async () => {
     if (!isConfigured) {
       setState((current) => ({
         ...current,
         loading: false,
       }));
+
       return;
     }
 
     const {
       data: { session },
+      error,
     } = await supabase.auth.getSession();
 
+    if (error) {
+      console.error(
+        "Session error:",
+        error
+      );
+    }
+
+    /* No active session */
     if (!session?.user) {
       setState({
         user: null,
@@ -114,33 +160,51 @@ export function AuthProvider({
         member: null,
         loading: false,
       });
+
       return;
     }
 
-    const admin = await isAdmin(session.user.id);
+    const currentUser = session.user;
+
+    /* ---------------------------------------------------
+       ADMIN CHECK
+    --------------------------------------------------- */
+
+    const admin = await isAdmin(
+      currentUser.id
+    );
 
     if (admin) {
       setState({
-        user: session.user,
+        user: currentUser,
         role: "admin",
         member: null,
         loading: false,
       });
+
       return;
     }
 
+    /* ---------------------------------------------------
+       MEMBER PROFILE
+    --------------------------------------------------- */
+
     const member = await loadProfile(
-      session.user.id,
-      session.user.email || ""
+      currentUser.id,
+      currentUser.email || ""
     );
 
     setState({
-      user: session.user,
+      user: currentUser,
       role: "member",
       member,
       loading: false,
     });
   }, []);
+
+  /* -----------------------------------------------------
+     INITIAL SESSION + AUTH LISTENER
+  ----------------------------------------------------- */
 
   useEffect(() => {
     void refreshSession();
@@ -151,14 +215,26 @@ export function AuthProvider({
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange(() => {
-      void refreshSession();
-    });
+    } = supabase.auth.onAuthStateChange(
+      (_event, _session) => {
+        /*
+         * Do not perform heavy Supabase queries directly
+         * inside the auth callback.
+         */
+        setTimeout(() => {
+          void refreshSession();
+        }, 0);
+      }
+    );
 
     return () => {
       subscription.unsubscribe();
     };
   }, [refreshSession]);
+
+  /* -----------------------------------------------------
+     MEMBER LOGIN
+  ----------------------------------------------------- */
 
   const login = async (
     email: string,
@@ -170,9 +246,20 @@ export function AuthProvider({
       };
     }
 
+    const cleanEmail = email
+      .trim()
+      .toLowerCase();
+
+    if (!cleanEmail || !password) {
+      return {
+        error:
+          "Please enter your email and password.",
+      };
+    }
+
     const { data, error } =
       await supabase.auth.signInWithPassword({
-        email,
+        email: cleanEmail,
         password,
       });
 
@@ -188,7 +275,15 @@ export function AuthProvider({
       };
     }
 
-    if (await isAdmin(data.user.id)) {
+    /* ---------------------------------------------------
+       ADMIN MUST USE ADMIN LOGIN
+    --------------------------------------------------- */
+
+    const admin = await isAdmin(
+      data.user.id
+    );
+
+    if (admin) {
       await supabase.auth.signOut();
 
       return {
@@ -197,9 +292,13 @@ export function AuthProvider({
       };
     }
 
+    /* ---------------------------------------------------
+       LOAD MEMBER PROFILE
+    --------------------------------------------------- */
+
     const profile = await loadProfile(
       data.user.id,
-      data.user.email || email
+      data.user.email || cleanEmail
     );
 
     if (!profile) {
@@ -210,6 +309,10 @@ export function AuthProvider({
           "Your member profile is not ready yet. Please wait for admin approval.",
       };
     }
+
+    /* ---------------------------------------------------
+       STATUS CHECK
+    --------------------------------------------------- */
 
     if (profile.status === "pending") {
       await supabase.auth.signOut();
@@ -242,14 +345,23 @@ export function AuthProvider({
       await supabase.auth.signOut();
 
       return {
-        error: `Account status: ${profile.status}.`,
+        error:
+          `Account status: ${profile.status}.`,
       };
     }
+
+    /* ---------------------------------------------------
+       APPROVED
+    --------------------------------------------------- */
 
     await refreshSession();
 
     return {};
   };
+
+  /* -----------------------------------------------------
+     MEMBER SIGNUP
+  ----------------------------------------------------- */
 
   const signup = async (
     email: string,
@@ -262,12 +374,16 @@ export function AuthProvider({
       };
     }
 
-    const cleanEmail = email.trim();
+    const cleanEmail = email
+      .trim()
+      .toLowerCase();
+
     const cleanName = name.trim();
 
     if (!cleanEmail) {
       return {
-        error: "Please enter your email address.",
+        error:
+          "Please enter your email address.",
       };
     }
 
@@ -284,13 +400,31 @@ export function AuthProvider({
       };
     }
 
+    /* ---------------------------------------------------
+       CREATE SUPABASE AUTH USER
+
+       No emailRedirectTo.
+       No /verify-email flow.
+       Admin approval controls access.
+    --------------------------------------------------- */
+
     const { data, error } =
       await supabase.auth.signUp({
         email: cleanEmail,
         password,
+        options: {
+          data: {
+            display_name: cleanName,
+          },
+        },
       });
 
     if (error) {
+      console.error(
+        "Signup failed:",
+        error
+      );
+
       return {
         error: error.message,
       };
@@ -298,57 +432,62 @@ export function AuthProvider({
 
     if (!data.user) {
       return {
-        error: "Account creation failed.",
+        error:
+          "Account creation failed.",
       };
     }
 
-    /*
-     * Important:
-     *
-     * The existing database has RLS enabled on profiles.
-     * We intentionally do NOT bypass RLS or use a service-role
-     * key in the browser.
-     *
-     * Try the existing profile policy first.
-     */
-    const { error: profileError } = await supabase
-      .from("profiles")
-      .upsert(
-        {
-          user_id: data.user.id,
-          display_name: cleanName,
-          status: "pending",
-        },
-        {
-          onConflict: "user_id",
-        }
-      );
+    /* ---------------------------------------------------
+       CREATE / UPDATE MEMBER PROFILE
 
-    /*
-     * If the existing RLS policy rejects the profile insert,
-     * the Auth account itself was still created successfully.
-     *
-     * Do not expose a misleading "Supabase is not configured"
-     * message and do not use unsafe client-side credentials.
-     */
+       Database RLS allows the authenticated user
+       to create their own profile.
+    --------------------------------------------------- */
+
+    const { error: profileError } =
+      await supabase
+        .from("profiles")
+        .upsert(
+          {
+            user_id: data.user.id,
+            display_name: cleanName,
+            status: "pending",
+            updated_at:
+              new Date().toISOString(),
+          },
+          {
+            onConflict: "user_id",
+          }
+        );
+
     if (profileError) {
-      console.warn(
-        "Profile creation was blocked by the existing RLS policy:",
-        profileError.message
+      console.error(
+        "Profile creation failed:",
+        profileError
       );
 
       await supabase.auth.signOut();
 
       return {
         error:
-          "Account created, but your member profile could not be created because of the current database permissions. Please contact the administrator.",
+          "Account created, but your member profile could not be created. Please contact the administrator.",
       };
     }
+
+    /* ---------------------------------------------------
+       SIGNUP COMPLETE
+
+       Account remains pending until admin approves.
+    --------------------------------------------------- */
 
     await supabase.auth.signOut();
 
     return {};
   };
+
+  /* -----------------------------------------------------
+     ADMIN LOGIN
+  ----------------------------------------------------- */
 
   const adminLogin = async (
     email: string,
@@ -356,13 +495,25 @@ export function AuthProvider({
   ): Promise<{ error?: string }> => {
     if (!isConfigured) {
       return {
-        error: "Supabase is not configured.",
+        error:
+          "Supabase is not configured.",
+      };
+    }
+
+    const cleanEmail = email
+      .trim()
+      .toLowerCase();
+
+    if (!cleanEmail || !password) {
+      return {
+        error:
+          "Please enter your admin email and password.",
       };
     }
 
     const { data, error } =
       await supabase.auth.signInWithPassword({
-        email,
+        email: cleanEmail,
         password,
       });
 
@@ -378,7 +529,13 @@ export function AuthProvider({
       };
     }
 
-    const admin = await isAdmin(data.user.id);
+    /* ---------------------------------------------------
+       ADMIN TABLE CHECK
+    --------------------------------------------------- */
+
+    const admin = await isAdmin(
+      data.user.id
+    );
 
     if (!admin) {
       await supabase.auth.signOut();
@@ -394,6 +551,10 @@ export function AuthProvider({
     return {};
   };
 
+  /* -----------------------------------------------------
+     LOGOUT
+  ----------------------------------------------------- */
+
   const logout = async () => {
     if (isConfigured) {
       await supabase.auth.signOut();
@@ -406,6 +567,10 @@ export function AuthProvider({
       loading: false,
     });
   };
+
+  /* -----------------------------------------------------
+     PROVIDER
+  ----------------------------------------------------- */
 
   return (
     <AuthContext.Provider
@@ -423,8 +588,14 @@ export function AuthProvider({
   );
 }
 
+/* -------------------------------------------------------
+   USE AUTH
+------------------------------------------------------- */
+
 export function useAuth() {
-  const context = useContext(AuthContext);
+  const context = useContext(
+    AuthContext
+  );
 
   if (!context) {
     throw new Error(
